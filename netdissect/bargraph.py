@@ -1,7 +1,8 @@
 from xml.etree import ElementTree as et
 
 def make_svg_bargraph(labels, heights, categories=None, palette=None,
-        barheight=100, barwidth=12, show_labels=True, file_header=False):
+        barheight=100, barwidth=12, show_labels=True, file_header=False,
+        data_url=False):
     if palette is None:
         palette = default_bargraph_palette
     if categories is None:
@@ -10,7 +11,8 @@ def make_svg_bargraph(labels, heights, categories=None, palette=None,
     textheight = barheight if show_labels else 0
     labelsize = float(barwidth)
     gap = float(barwidth) / 4
-    textsize = barwidth + gap
+    # textsize = barwidth + gap
+    textsize = barwidth + gap / 2
     rollup = max(heights, default=1)
     textmargin = float(labelsize) * 2 / 3
     leftmargin = 32
@@ -82,12 +84,16 @@ def make_svg_bargraph(labels, heights, categories=None, palette=None,
         x += (barwidth + gap) * catcount
     # Output - this is the bare svg.
     result = et.tostring(svg).decode('utf-8')
-    if file_header:
-        result = (
+    if file_header or data_url:
+        result = ''.join([
             '<?xml version=\"1.0\" standalone=\"no\"?>\n',
             '<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\"\n',
-            '\"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\">\n'
-            + result)
+            '\"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\">\n',
+            result])
+    if data_url:
+        import base64
+        result = 'data:image/svg+xml;base64,' + base64.b64encode(
+                result.encode('utf-8')).decode('utf-8')
     return result
 
 default_bargraph_palette = [

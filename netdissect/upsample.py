@@ -20,6 +20,7 @@ def upsampler(target_shape, data_shape=None,
         if image_size is not None and data_shape is None:
             data_shape = sequence_data_size(convolutions, image_size)
     assert data_shape is not None
+    assert len(data_shape) == 2
     grid = upsample_grid(data_shape, target_shape, image_size, scale_offset,
             dtype, device)
     batch_grid = grid
@@ -31,8 +32,12 @@ def upsampler(target_shape, data_shape=None,
             batch_grid = grid.expand((data.shape[0],) + grid.shape[1:])
         if batch_grid.device != data.device:
             batch_grid = batch_grid.to(data.device)
-        return torch.nn.functional.grid_sample(data, batch_grid, mode=mode,
-                padding_mode=padding_mode)
+        try:
+            return torch.nn.functional.grid_sample(data, batch_grid, mode=mode,
+                    padding_mode=padding_mode, align_corners=True)
+        except:
+            return torch.nn.functional.grid_sample(data, batch_grid, mode=mode,
+                    padding_mode=padding_mode) # older pytorch version
     return upsample_func
 
 def sequence_scale_offset(modulelist):
@@ -133,7 +138,7 @@ def upsample_grid(data_shape, target_shape, image_size=None,
                     for o, ns, ts in zip(offset, image_size, target_shape))
     # Pytorch needs target coordinates in terms of source coordinates [-1..1]
     ty, tx = (((torch.arange(ts, dtype=dtype, device=device) - o)
-                  * (2 / (s * (ss - 1))) - 1)
+                  * (2 / (s * max(1, (ss - 1)))) - 1)
         for ts, ss, s, o, in zip(target_shape, data_shape, scale, offset))
     # Whoa, note that grid_sample reverses the order y, x -> x, y.
     grid = torch.stack(
@@ -143,7 +148,10 @@ def upsample_grid(data_shape, target_shape, image_size=None,
 
 def image_size_from_source(source):
     sizer = find_sizer(source)
-    size = sizer.size
+    if sizer is not None:
+        size = sizer.size
+    elif hasattr(source, 'resolution'):
+        size = source.resolution
     if hasattr(size, '__len__'):
         return size
     return (size, size)

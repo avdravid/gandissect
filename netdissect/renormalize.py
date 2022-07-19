@@ -1,22 +1,50 @@
-import numpy, torch, PIL
+import numpy, torch, PIL, io, base64, re
 from torchvision import transforms
 
-def as_tensor(data, source=None, mode='zc'):
-    renorm = renormalizer(source=source, mode=mode)
+def as_tensor(data, source='zc', target='zc'):
+    renorm = renormalizer(source=source, target=target)
     return renorm(data)
 
-def as_image(data, source='zc', mode='byte'):
+def as_image(data, source='zc', target='byte'):
     assert len(data.shape) == 3
-    renorm = renormalizer(source=source, mode=mode)
+    renorm = renormalizer(source=source, target=target)
     return PIL.Image.fromarray(renorm(data).
             permute(1,2,0).cpu().numpy())
 
-def renormalizer(source=None, mode='zc'):
+def as_url(data, source='zc', size=None):
+    if isinstance(data, PIL.Image.Image):
+        img = data
+    else:
+        img = as_image(data, source)
+    if size is not None:
+        img = img.resize(size, resample=PIL.Image.BILINEAR)
+    buffered = io.BytesIO()
+    img.save(buffered, format='png')
+    b64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+    return 'data:image/png;base64,%s' % (b64)
+
+def from_image(im, target='zc', size=None):
+    if im.format != 'RGB':
+        im = im.convert('RGB')
+    if size is not None:
+        im = im.resize(size, resample=PIL.Image.BILINEAR)
+    pt = transforms.functional.to_tensor(im)
+    renorm = renormalizer(source='pt', target=target)
+    return renorm(pt)
+
+def from_url(url, target='zc', size=None):
+    image_data = re.sub('^data:image/.+;base64,', '', url)
+    im = PIL.Image.open(io.BytesIO(base64.b64decode(image_data)))
+    if target == 'image' and size is None:
+        return im
+    return from_image(im, target, size=size)
+
+def renormalizer(source='zc', target='zc'):
     '''
     Returns a function that imposes a standard normalization on
     the image data.  The returned renormalizer operates on either
     3d tensor (single image) or 4d tensor (image batch) data.
-    The normalization mode choices are:
+    The normalization target choices are:
 
         zc (default) - zero centered [-1..1]
         pt - pytorch [0..1]
@@ -35,16 +63,20 @@ def renormalizer(source=None, mode='zc'):
         oldoffset, oldscale = (
                 (normalizer.mean, normalizer.std) if normalizer is not None
                 else OFFSET_SCALE['pt'])
-    newoffset, newscale = (mode if isinstance(mode, tuple)
-            else OFFSET_SCALE[mode])
+    newoffset, newscale = (target if isinstance(target, tuple)
+            else OFFSET_SCALE[target])
     return Renormalizer(oldoffset, oldscale, newoffset, newscale,
-            tobyte=(mode == 'byte'))
+            tobyte=(target == 'byte'))
 
-# The three commonly-seed image normalization schemes.
+# The three commonly-seen image normalization schemes.
 OFFSET_SCALE=dict(
             pt=([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]),
             zc=([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
             imagenet=([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            imagenet_meanonly=([0.485, 0.456, 0.406],
+                [1.0/255, 1.0/255, 1.0/255]),
+            places_meanonly=([0.475, 0.441, 0.408],
+                [1.0/255, 1.0/255, 1.0/255]),
             byte=([0.0, 0.0, 0.0], [1.0/255, 1.0/255, 1.0/255]))
 
 NORMALIZER={k: transforms.Normalize(*OFFSET_SCALE[k]) for k in OFFSET_SCALE}
